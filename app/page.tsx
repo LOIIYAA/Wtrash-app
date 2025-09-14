@@ -1,14 +1,54 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { User, Bell, Plus, MapPin, ArrowLeft, Navigation, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { ArrowLeft, MapPin, Navigation, User, Bell, Plus, Clock, ChevronRight, Calendar, Leaf } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
 type CompostingStage = 0 | 1 | 2 | 3 | 4 | 5
+
+interface LocationData {
+  address: string
+  lat: number
+  lng: number
+}
+
+interface GoogleMapsGeocoderResult {
+  formatted_address: string
+  geometry: {
+    location: {
+      lat(): number
+      lng(): number
+    }
+  }
+}
+
+interface GoogleMapsGeocoder {
+  geocode(
+    request: { location: { lat: number; lng: number } },
+    callback: (results: GoogleMapsGeocoderResult[] | null, status: string) => void,
+  ): void
+}
+
+interface GoogleMaps {
+  Map: any
+  Marker: any
+  Geocoder: new () => GoogleMapsGeocoder
+  SymbolPath: {
+    CIRCLE: any
+  }
+}
+
+declare global {
+  interface Window {
+    google?: {
+      maps?: GoogleMaps
+    }
+  }
+}
 
 export default function HomePage() {
   const [currentPage, setCurrentPage] = useState<
@@ -22,10 +62,19 @@ export default function HomePage() {
     | "menu-task"
     | "task-pra-kompos"
     | "task-anorganik"
+    | "task-ai"
   >("home")
   const [devices, setDevices] = useState<Array<{ id: string; name: string; installDate: string }>>([])
   const [deviceName, setDeviceName] = useState("")
   const [selectedDevice, setSelectedDevice] = useState<{ id: string; name: string; installDate: string } | null>(null)
+
+  const [currentLocation, setCurrentLocation] = useState<LocationData>({
+    address: "Sumber pucung",
+    lat: -7.9666,
+    lng: 112.6326,
+  })
+  const [hasLocationPermission, setHasLocationPermission] = useState(false)
+  const [hasWifiPermission, setHasWifiPermission] = useState(false)
 
   const [compostingStage, setCompostingStage] = useState<CompostingStage>(0)
   const [stageStartTime, setStageStartTime] = useState<number>(Date.now())
@@ -36,6 +85,143 @@ export default function HomePage() {
     kertasMinyak: 52,
     maxCapacity: 1000, // grams
   })
+
+  const [selectedDate, setSelectedDate] = useState(new Date())
+  const [showCalendar, setShowCalendar] = useState(false)
+  const [hoveredHour, setHoveredHour] = useState<number | null>(null)
+
+  useEffect(() => {
+    const loadGoogleMaps = () => {
+      if (window.google) return Promise.resolve()
+
+      return new Promise((resolve, reject) => {
+        const script = document.createElement("script")
+        script.src = `https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=places`
+        script.async = true
+        script.defer = true
+        script.onload = resolve
+        script.onerror = reject
+        document.head.appendChild(script)
+      })
+    }
+
+    loadGoogleMaps().catch(() => {
+      console.log("Google Maps failed to load, using fallback")
+    })
+  }, [])
+
+  const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
+    try {
+      if (window.google && window.google.maps) {
+        const geocoder = new window.google.maps.Geocoder()
+        const result = await new Promise<GoogleMapsGeocoderResult[]>((resolve, reject) => {
+          geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+            if (status === "OK" && results) {
+              resolve(results)
+            } else {
+              reject(status)
+            }
+          })
+        })
+
+        if (result[0]) {
+          return result[0].formatted_address
+        }
+      }
+    } catch (error) {
+      console.log("Geocoding failed, using fallback")
+    }
+
+    // Fallback addresses based on coordinates
+    const fallbackAddresses = [
+      "Jl. Kenangan Indah No. 3 Kec. Mantan",
+      "Jl. Sumber Pucung No. 15",
+      "Jl. Malang Raya No. 22",
+      "Jl. Sawojajar No. 8",
+    ]
+    return fallbackAddresses[Math.floor(Math.random() * fallbackAddresses.length)]
+  }
+
+  const requestPermissions = async () => {
+    try {
+      // Request location permission
+      if (navigator.geolocation) {
+        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 60000,
+          })
+        })
+
+        setHasLocationPermission(true)
+        const address = await reverseGeocode(position.coords.latitude, position.coords.longitude)
+        setCurrentLocation({
+          address,
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        })
+      }
+
+      // Simulate WiFi permission (browser doesn't have direct WiFi API)
+      setHasWifiPermission(true)
+
+      return true
+    } catch (error) {
+      console.error("Permission denied:", error)
+      return false
+    }
+  }
+
+  const getWasteDataForDate = (date: Date) => {
+    const dateKey = date.toDateString()
+    const sampleData: Record<string, any> = {
+      // September 11, 2025 - Peak at 12pm with 50 total
+      [new Date(2025, 8, 11).toDateString()]: {
+        hourlyData: [0, 0, 0, 0, 8, 0, 12, 0, 0, 0, 0, 0, 50, 18, 0, 0, 15, 0, 0, 0, 0, 0, 0, 0],
+        prediction: "18:00 pm - 01:00 am",
+        summary: { anorganik: 28, jam: "12:00 pm", organik: 22 },
+        peakHour: 12,
+        peakValue: 50,
+      },
+      // September 12, 2025 - Peak at 1pm with 60 total
+      [new Date(2025, 8, 12).toDateString()]: {
+        hourlyData: [0, 0, 0, 0, 15, 0, 8, 0, 0, 0, 0, 0, 45, 60, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0],
+        prediction: "17:30 pm - 00:30 am",
+        summary: { anorganik: 35, jam: "01:00 pm", organik: 25 },
+        peakHour: 13,
+        peakValue: 60,
+      },
+      // September 13, 2025 - Peak at 10am with 42 total
+      [new Date(2025, 8, 13).toDateString()]: {
+        hourlyData: [0, 0, 0, 0, 5, 0, 18, 0, 0, 0, 42, 0, 25, 12, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0],
+        prediction: "19:00 pm - 02:00 am",
+        summary: { anorganik: 18, jam: "10:00 am", organik: 24 },
+        peakHour: 10,
+        peakValue: 42,
+      },
+      // September 14, 2025 - Peak at 3pm with 38 total
+      [new Date(2025, 8, 14).toDateString()]: {
+        hourlyData: [0, 0, 0, 0, 10, 0, 5, 0, 0, 0, 0, 0, 22, 15, 0, 38, 12, 0, 0, 0, 0, 0, 0, 0],
+        prediction: "18:30 pm - 01:30 am",
+        summary: { anorganik: 20, jam: "03:00 pm", organik: 18 },
+        peakHour: 15,
+        peakValue: 38,
+      },
+      // September 15, 2025 - Peak at 11am with 55 total
+      [new Date(2025, 8, 15).toDateString()]: {
+        hourlyData: [0, 0, 0, 0, 12, 0, 8, 0, 0, 0, 0, 55, 30, 20, 0, 0, 18, 0, 0, 0, 0, 0, 0, 0],
+        prediction: "17:00 pm - 00:00 am",
+        summary: { anorganik: 32, jam: "11:00 am", organik: 23 },
+        peakHour: 11,
+        peakValue: 55,
+      },
+    }
+
+    return sampleData[dateKey] || sampleData[new Date(2025, 8, 11).toDateString()]
+  }
+
+  const currentData = getWasteDataForDate(selectedDate)
 
   useEffect(() => {
     if (currentPage === "task-pra-kompos" && compostingStage > 0 && compostingStage < 5) {
@@ -143,19 +329,12 @@ export default function HomePage() {
           {/* Add Location Button */}
           <Button
             className="w-full h-12 bg-[#66B4C1] hover:bg-[#5aa3b0] text-white font-medium rounded-xl"
-            onClick={() => {
-              // Simulate permission request
-              if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(
-                  () => {
-                    setCurrentPage("location-map")
-                  },
-                  () => {
-                    alert("Location permission denied. Please enable location access to continue.")
-                  },
-                )
-              } else {
+            onClick={async () => {
+              const permissionGranted = await requestPermissions()
+              if (permissionGranted) {
                 setCurrentPage("location-map")
+              } else {
+                alert("Location permission denied. Please enable location access to continue.")
               }
             }}
           >
@@ -175,31 +354,62 @@ export default function HomePage() {
         </Button>
       </header>
 
-      {/* Map Background */}
       <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-green-50">
-        {/* Simulated map with streets */}
-        <div className="absolute inset-0 opacity-30">
-          <svg className="w-full h-full" viewBox="0 0 400 800">
-            {/* Street lines */}
-            <line x1="0" y1="200" x2="400" y2="200" stroke="#94a3b8" strokeWidth="2" />
-            <line x1="0" y1="400" x2="400" y2="400" stroke="#94a3b8" strokeWidth="2" />
-            <line x1="0" y1="600" x2="400" y2="600" stroke="#94a3b8" strokeWidth="2" />
-            <line x1="100" y1="0" x2="100" y2="800" stroke="#94a3b8" strokeWidth="2" />
-            <line x1="200" y1="0" x2="200" y2="800" stroke="#94a3b8" strokeWidth="3" />
-            <line x1="300" y1="0" x2="300" y2="800" stroke="#94a3b8" strokeWidth="2" />
+        {window.google && window.google.maps ? (
+          // Google Maps container
+          <div
+            id="google-map"
+            className="w-full h-full"
+            ref={(el) => {
+              if (el && window.google && !el.hasChildNodes()) {
+                const map = new window.google.maps.Map(el, {
+                  center: { lat: currentLocation.lat, lng: currentLocation.lng },
+                  zoom: 16,
+                  styles: [
+                    {
+                      featureType: "all",
+                      elementType: "geometry.fill",
+                      stylers: [{ color: "#f0f9ff" }],
+                    },
+                  ],
+                })
 
-            {/* Building blocks */}
-            <rect x="20" y="220" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
-            <rect x="120" y="220" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
-            <rect x="220" y="220" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
-            <rect x="320" y="220" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
-
-            <rect x="20" y="420" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
-            <rect x="120" y="420" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
-            <rect x="220" y="420" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
-            <rect x="320" y="420" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
-          </svg>
-        </div>
+                new window.google.maps.Marker({
+                  position: { lat: currentLocation.lat, lng: currentLocation.lng },
+                  map: map,
+                  icon: {
+                    path: window.google.maps.SymbolPath.CIRCLE,
+                    scale: 8,
+                    fillColor: "#66B4C1",
+                    fillOpacity: 1,
+                    strokeColor: "#ffffff",
+                    strokeWeight: 2,
+                  },
+                })
+              }
+            }}
+          />
+        ) : (
+          // Fallback simulated map
+          <div className="absolute inset-0 opacity-30">
+            <svg className="w-full h-full" viewBox="0 0 400 800">
+              <line x1="0" y1="200" x2="400" y2="200" stroke="#94a3b8" strokeWidth="2" />
+              <line x1="0" y1="400" x2="400" y2="400" stroke="#94a3b8" strokeWidth="2" />
+              <line x1="0" y1="600" x2="400" y2="600" stroke="#94a3b8" strokeWidth="2" />
+              <line x1="100" y1="0" x2="100" y2="800" stroke="#94a3b8" strokeWidth="2" />
+              <line x1="200" y1="0" x2="200" y2="800" stroke="#94a3b8" strokeWidth="3" />
+              <line x1="300" y1="0" x2="300" y2="800" stroke="#94a3b8" strokeWidth="2" />
+              <rect x="20" y="220" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
+              <rect x="120" y="220" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
+              <rect x="220" y="220" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
+              <rect x="320" y="220" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
+              <rect x="20" y="420" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
+              <rect x="120" y="420" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
+              <rect x="220" y="420" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
+              <rect x="320" y="420" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
+            </svg>
+          </div>
+        )}
       </div>
 
       {/* Location Marker */}
@@ -214,11 +424,10 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Location Card Overlay */}
       <div className="absolute top-20 left-4 right-4 z-20">
         <Card className="p-4 bg-white/95 backdrop-blur-sm border border-border rounded-xl shadow-lg">
           <h3 className="font-bold text-card-foreground mb-1">Titik W-Trash</h3>
-          <p className="text-sm text-muted-foreground">Jl. Kenangan Indah No. 3 Kec. Mantan</p>
+          <p className="text-sm text-muted-foreground">{currentLocation.address}</p>
         </Card>
       </div>
 
@@ -226,7 +435,9 @@ export default function HomePage() {
       <div className="absolute bottom-6 left-4 right-4 z-20">
         <Button
           className="w-full h-12 bg-[#66B4C1] hover:bg-[#5aa3b0] text-white font-medium rounded-xl"
-          onClick={() => setCurrentPage("input-device")}
+          onClick={() => {
+            setCurrentPage("input-device")
+          }}
         >
           Continue
         </Button>
@@ -236,9 +447,43 @@ export default function HomePage() {
       <Button
         size="icon"
         className="absolute bottom-24 right-6 z-20 w-12 h-12 bg-white hover:bg-gray-50 text-gray-600 rounded-full shadow-lg border border-border"
-        onClick={() => {
-          // Simulate re-centering map
-          alert("Map centered to current location")
+        onClick={async () => {
+          try {
+            const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+              navigator.geolocation.getCurrentPosition(resolve, reject)
+            })
+
+            const address = await reverseGeocode(position.coords.latitude, position.coords.longitude)
+            setCurrentLocation({
+              address,
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+            })
+
+            // Re-render Google Map if available
+            const mapEl = document.getElementById("google-map")
+            if (mapEl && window.google) {
+              const map = new window.google.maps.Map(mapEl, {
+                center: { lat: position.coords.latitude, lng: position.coords.longitude },
+                zoom: 16,
+              })
+
+              new window.google.maps.Marker({
+                position: { lat: position.coords.latitude, lng: position.coords.longitude },
+                map: map,
+                icon: {
+                  path: window.google.maps.SymbolPath.CIRCLE,
+                  scale: 8,
+                  fillColor: "#66B4C1",
+                  fillOpacity: 1,
+                  strokeColor: "#ffffff",
+                  strokeWeight: 2,
+                },
+              })
+            }
+          } catch (error) {
+            alert("Unable to get current location")
+          }
         }}
       >
         <Navigation className="h-5 w-5" />
@@ -364,7 +609,9 @@ export default function HomePage() {
             </Avatar>
             <div>
               <p className="font-semibold text-card-foreground">Nama</p>
-              <p className="text-sm text-muted-foreground">12 Devices</p>
+              <p className="text-sm text-muted-foreground">
+                {devices.length} {devices.length === 1 ? "Device" : "Devices"}
+              </p>
             </div>
           </div>
           <Button variant="ghost" size="icon">
@@ -380,7 +627,9 @@ export default function HomePage() {
               <span className="font-medium text-card-foreground">Lokasi Kamu</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">Sumber pucung</span>
+              <span className="text-sm text-muted-foreground">
+                {currentLocation.address.split(",")[0] || currentLocation.address}
+              </span>
               <Button variant="ghost" size="icon">
                 →
               </Button>
@@ -393,7 +642,9 @@ export default function HomePage() {
               <span className="font-medium text-card-foreground">Devices Kamu</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">12 Devices</span>
+              <span className="text-sm text-muted-foreground">
+                {devices.length} {devices.length === 1 ? "Device" : "Devices"}
+              </span>
               <Button variant="ghost" size="icon">
                 →
               </Button>
@@ -702,7 +953,10 @@ export default function HomePage() {
           </div>
         </Card>
 
-        <Card className="p-4 bg-card border-border rounded-xl hover:shadow-md transition-shadow cursor-pointer">
+        <Card
+          className="p-4 bg-card border-border rounded-xl hover:shadow-md transition-shadow cursor-pointer"
+          onClick={() => setCurrentPage("task-ai")}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground mb-1">Support to SDG's Program</p>
@@ -1014,6 +1268,229 @@ export default function HomePage() {
     )
   }
 
+  const renderTaskAIPage = () => {
+    const formatDate = (date: Date) => {
+      const days = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"]
+      const months = [
+        "Januari",
+        "Februari",
+        "Maret",
+        "April",
+        "Mei",
+        "Juni",
+        "Juli",
+        "Agustus",
+        "September",
+        "Oktober",
+        "November",
+        "Desember",
+      ]
+      return `${days[date.getDay()]}, ${date.getDate()}, ${date.getFullYear()}`
+    }
+
+    const formatCalendarDate = (date: Date) => {
+      const months = [
+        "Januari",
+        "Februari",
+        "Maret",
+        "April",
+        "Mei",
+        "Juni",
+        "Juli",
+        "Agustus",
+        "September",
+        "Oktober",
+        "November",
+        "Desember",
+      ]
+      return months[date.getMonth()]
+    }
+
+    const maxValue = Math.max(...currentData.hourlyData)
+
+    return (
+      <div className="min-h-screen bg-background relative">
+        {/* Header */}
+        <header className="flex items-center justify-between p-4 bg-background border-b border-border">
+          <div className="flex items-center">
+            <Button variant="ghost" size="icon" onClick={() => setCurrentPage("menu-task")} className="mr-3">
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <h1 className="text-lg font-semibold text-foreground">Grafik pembuangan sampah</h1>
+          </div>
+
+          {/* Date Dropdown */}
+          <Button
+            variant="outline"
+            onClick={() => setShowCalendar(true)}
+            className="text-sm px-3 py-1 h-8 border-teal-500 text-teal-600 hover:bg-teal-50"
+          >
+            {formatDate(selectedDate)}
+            <ChevronRight className="h-4 w-4 ml-1" />
+          </Button>
+        </header>
+
+        {/* Main Content */}
+        <main className="p-4 space-y-6">
+          {/* Chart Section */}
+          <div className="bg-card rounded-xl p-4 border border-border">
+            <div className="h-80 relative">
+              {/* Y-axis labels */}
+              <div className="absolute left-0 top-0 h-full flex flex-col justify-between text-xs text-muted-foreground py-4">
+                <span>100</span>
+                <span>80</span>
+                <span>50</span>
+                <span>20</span>
+                <span>10</span>
+                <span>0</span>
+              </div>
+
+              {/* Chart area */}
+              <div className="ml-8 h-full flex items-end justify-between px-2 pb-10">
+                {currentData.hourlyData.map((value: number, index: number) => (
+                  <div
+                    key={index}
+                    className="flex flex-col items-center relative group cursor-pointer"
+                    onMouseEnter={() => setHoveredHour(index)}
+                    onMouseLeave={() => setHoveredHour(null)}
+                  >
+                    {/* Tooltip */}
+                    {hoveredHour === index && value > 0 && (
+                      <div className="absolute bottom-full mb-2 bg-white border border-border rounded-lg px-3 py-2 shadow-lg z-10 whitespace-nowrap">
+                        <div className="text-xs font-medium text-foreground">{value} Sampah</div>
+                        <div className="text-xs text-muted-foreground">
+                          {String(index).padStart(2, "0")}:00 - {String(index + 1).padStart(2, "0")}:00
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Bar */}
+                    <div
+                      className="w-3 bg-teal-500 rounded-t-sm transition-all duration-200 hover:bg-teal-600"
+                      style={{
+                        height: `${Math.max((value / maxValue) * 240, value > 0 ? 8 : 0)}px`,
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div className="absolute bottom-2 left-8 right-2 flex justify-between text-xs text-muted-foreground px-2">
+                <span>0</span>
+                <span>4</span>
+                <span>8</span>
+                <span>12</span>
+                <span>16</span>
+                <span>20</span>
+                <span>24</span>
+              </div>
+            </div>
+          </div>
+
+          {/* AI Prediction Card */}
+          <Card className="p-4 bg-card border-border rounded-xl">
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium text-teal-600">Prediksi AI</h3>
+              <div className="text-xl font-bold text-foreground">{currentData.prediction}</div>
+              <p className="text-sm text-muted-foreground">waktu berjalannya Pra kompos W-trash</p>
+            </div>
+          </Card>
+
+          {/* Summary Card */}
+          <Card className="p-4 bg-card border-border rounded-xl">
+            <div className="space-y-4">
+              <h3 className="text-sm font-medium text-muted-foreground">Waktu Padat Wtrash</h3>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="flex flex-col items-center space-y-2">
+                  <div className="w-10 h-10 bg-teal-100 rounded-lg flex items-center justify-center">
+                    <Calendar className="h-5 w-5 text-teal-600" />
+                  </div>
+                  <div className="text-center">
+                    <div className="text-xl font-bold text-foreground">{currentData.summary.anorganik}</div>
+                    <div className="text-xs text-muted-foreground">Anorganik</div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col items-center space-y-2">
+                  <div className="w-10 h-10 bg-teal-100 rounded-lg flex items-center justify-center">
+                    <Clock className="h-5 w-5 text-teal-600" />
+                  </div>
+                  <div className="text-center">
+                    <div className="text-xl font-bold text-foreground">{currentData.summary.jam}</div>
+                    <div className="text-xs text-muted-foreground">Jam</div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col items-center space-y-2">
+                  <div className="w-10 h-10 bg-teal-100 rounded-lg flex items-center justify-center">
+                    <Leaf className="h-5 w-5 text-teal-600" />
+                  </div>
+                  <div className="text-center">
+                    <div className="text-xl font-bold text-foreground">{currentData.summary.organik}</div>
+                    <div className="text-xs text-muted-foreground">Organik</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </main>
+
+        {/* Calendar Popup */}
+        {showCalendar && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl p-6 w-full max-w-sm">
+              <div className="text-center mb-4">
+                <h3 className="text-lg font-semibold text-teal-600">{formatCalendarDate(selectedDate)}</h3>
+              </div>
+
+              {/* Calendar Grid */}
+              <div className="grid grid-cols-7 gap-1 mb-4">
+                {["S", "M", "T", "W", "T", "F", "S"].map((day) => (
+                  <div key={day} className="text-center text-sm font-medium text-muted-foreground p-2">
+                    {day}
+                  </div>
+                ))}
+
+                {Array.from({ length: 30 }, (_, i) => i + 1).map((day) => {
+                  const isSelected = day === selectedDate.getDate()
+                  const testDate = new Date(2025, 8, day) // September 2025
+                  const hasData = [11, 12, 13, 14, 15].includes(day)
+
+                  return (
+                    <button
+                      key={day}
+                      onClick={() => {
+                        setSelectedDate(testDate)
+                      }}
+                      disabled={!hasData}
+                      className={`p-2 text-sm rounded-full transition-colors ${
+                        isSelected
+                          ? "bg-teal-500 text-white"
+                          : hasData
+                            ? "text-foreground hover:bg-teal-50 hover:text-teal-600"
+                            : "text-muted-foreground/50 cursor-not-allowed"
+                      }`}
+                    >
+                      {day}
+                    </button>
+                  )
+                })}
+              </div>
+
+              <Button
+                onClick={() => setShowCalendar(false)}
+                className="w-full bg-teal-500 hover:bg-teal-600 text-white"
+              >
+                Select
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   // Render current page
   switch (currentPage) {
     case "add-location":
@@ -1034,7 +1511,15 @@ export default function HomePage() {
       return renderTaskPraKomposPage()
     case "task-anorganik":
       return renderTaskAnorganikPage()
+    case "task-ai":
+      return renderTaskAIPage()
     default:
       return renderHomePage()
+  }
+}
+
+declare global {
+  interface Window {
+    google: any
   }
 }
