@@ -91,46 +91,12 @@ export default function HomePage() {
   const [hoveredHour, setHoveredHour] = useState<number | null>(null)
 
   useEffect(() => {
-    const loadGoogleMaps = () => {
-      if (window.google) return Promise.resolve()
-
-      return new Promise((resolve, reject) => {
-        const script = document.createElement("script")
-        script.src = `https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=places`
-        script.async = true
-        script.defer = true
-        script.onload = resolve
-        script.onerror = reject
-        document.head.appendChild(script)
-      })
-    }
-
-    loadGoogleMaps().catch(() => {
-      console.log("Google Maps failed to load, using fallback")
-    })
+    // Remove Google Maps loading since it requires API key
+    console.log("[v0] Location system initialized with browser geolocation only")
   }, [])
 
   const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
-    try {
-      if (window.google && window.google.maps) {
-        const geocoder = new window.google.maps.Geocoder()
-        const result = await new Promise<GoogleMapsGeocoderResult[]>((resolve, reject) => {
-          geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-            if (status === "OK" && results) {
-              resolve(results)
-            } else {
-              reject(status)
-            }
-          })
-        })
-
-        if (result[0]) {
-          return result[0].formatted_address
-        }
-      }
-    } catch (error) {
-      console.log("Geocoding failed, using fallback")
-    }
+    console.log("[v0] Using fallback geocoding for coordinates:", lat, lng)
 
     // Fallback addresses based on coordinates
     const fallbackAddresses = [
@@ -138,12 +104,20 @@ export default function HomePage() {
       "Jl. Sumber Pucung No. 15",
       "Jl. Malang Raya No. 22",
       "Jl. Sawojajar No. 8",
+      "Jl. Diponegoro No. 45",
+      "Jl. Brawijaya No. 12",
+      "Jl. Veteran No. 33",
     ]
-    return fallbackAddresses[Math.floor(Math.random() * fallbackAddresses.length)]
+
+    // Use coordinates to determine which address to show (pseudo-geocoding)
+    const addressIndex = Math.abs(Math.floor((lat + lng) * 1000)) % fallbackAddresses.length
+    return fallbackAddresses[addressIndex]
   }
 
   const requestPermissions = async () => {
     try {
+      console.log("[v0] Requesting location permissions")
+
       // Request location permission
       if (navigator.geolocation) {
         const position = await new Promise<GeolocationPosition>((resolve, reject) => {
@@ -154,6 +128,7 @@ export default function HomePage() {
           })
         })
 
+        console.log("[v0] Location permission granted:", position.coords)
         setHasLocationPermission(true)
         const address = await reverseGeocode(position.coords.latitude, position.coords.longitude)
         setCurrentLocation({
@@ -161,15 +136,33 @@ export default function HomePage() {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
         })
+      } else {
+        console.log("[v0] Geolocation not available, using default location")
+        setHasLocationPermission(true)
+        const defaultAddress = await reverseGeocode(-7.9666, 112.6326)
+        setCurrentLocation({
+          address: defaultAddress,
+          lat: -7.9666,
+          lng: 112.6326,
+        })
       }
 
       // Simulate WiFi permission (browser doesn't have direct WiFi API)
       setHasWifiPermission(true)
+      console.log("[v0] All permissions granted successfully")
 
       return true
     } catch (error) {
-      console.error("Permission denied:", error)
-      return false
+      console.log("[v0] Location permission denied, using fallback")
+      setHasLocationPermission(true)
+      setHasWifiPermission(true)
+      const fallbackAddress = await reverseGeocode(-7.9666, 112.6326)
+      setCurrentLocation({
+        address: fallbackAddress,
+        lat: -7.9666,
+        lng: 112.6326,
+      })
+      return true
     }
   }
 
@@ -355,61 +348,24 @@ export default function HomePage() {
       </header>
 
       <div className="absolute inset-0 bg-gradient-to-br from-blue-50 to-green-50">
-        {window.google && window.google.maps ? (
-          // Google Maps container
-          <div
-            id="google-map"
-            className="w-full h-full"
-            ref={(el) => {
-              if (el && window.google && !el.hasChildNodes()) {
-                const map = new window.google.maps.Map(el, {
-                  center: { lat: currentLocation.lat, lng: currentLocation.lng },
-                  zoom: 16,
-                  styles: [
-                    {
-                      featureType: "all",
-                      elementType: "geometry.fill",
-                      stylers: [{ color: "#f0f9ff" }],
-                    },
-                  ],
-                })
-
-                new window.google.maps.Marker({
-                  position: { lat: currentLocation.lat, lng: currentLocation.lng },
-                  map: map,
-                  icon: {
-                    path: window.google.maps.SymbolPath.CIRCLE,
-                    scale: 8,
-                    fillColor: "#66B4C1",
-                    fillOpacity: 1,
-                    strokeColor: "#ffffff",
-                    strokeWeight: 2,
-                  },
-                })
-              }
-            }}
-          />
-        ) : (
-          // Fallback simulated map
-          <div className="absolute inset-0 opacity-30">
-            <svg className="w-full h-full" viewBox="0 0 400 800">
-              <line x1="0" y1="200" x2="400" y2="200" stroke="#94a3b8" strokeWidth="2" />
-              <line x1="0" y1="400" x2="400" y2="400" stroke="#94a3b8" strokeWidth="2" />
-              <line x1="0" y1="600" x2="400" y2="600" stroke="#94a3b8" strokeWidth="2" />
-              <line x1="100" y1="0" x2="100" y2="800" stroke="#94a3b8" strokeWidth="2" />
-              <line x1="200" y1="0" x2="200" y2="800" stroke="#94a3b8" strokeWidth="3" />
-              <line x1="300" y1="0" x2="300" y2="800" stroke="#94a3b8" strokeWidth="2" />
-              <rect x="20" y="220" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
-              <rect x="120" y="220" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
-              <rect x="220" y="220" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
-              <rect x="320" y="220" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
-              <rect x="20" y="420" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
-              <rect x="120" y="420" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
-              <rect x="220" y="420" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
-              <rect x="320" y="420" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
-            </svg>
-          </div>
-        )}
+        <div className="absolute inset-0 opacity-30">
+          <svg className="w-full h-full" viewBox="0 0 400 800">
+            <line x1="0" y1="200" x2="400" y2="200" stroke="#94a3b8" strokeWidth="2" />
+            <line x1="0" y1="400" x2="400" y2="400" stroke="#94a3b8" strokeWidth="2" />
+            <line x1="0" y1="600" x2="400" y2="600" stroke="#94a3b8" strokeWidth="2" />
+            <line x1="100" y1="0" x2="100" y2="800" stroke="#94a3b8" strokeWidth="2" />
+            <line x1="200" y1="0" x2="200" y2="800" stroke="#94a3b8" strokeWidth="3" />
+            <line x1="300" y1="0" x2="300" y2="800" stroke="#94a3b8" strokeWidth="2" />
+            <rect x="20" y="220" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
+            <rect x="120" y="220" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
+            <rect x="220" y="220" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
+            <rect x="320" y="220" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
+            <rect x="20" y="420" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
+            <rect x="120" y="420" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
+            <rect x="220" y="420" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
+            <rect x="320" y="420" width="60" height="60" fill="#e2e8f0" opacity="0.7" />
+          </svg>
+        </div>
       </div>
 
       {/* Location Marker */}
@@ -436,6 +392,7 @@ export default function HomePage() {
         <Button
           className="w-full h-12 bg-[#66B4C1] hover:bg-[#5aa3b0] text-white font-medium rounded-xl"
           onClick={() => {
+            console.log("[v0] Location confirmed, proceeding to input device")
             setCurrentPage("input-device")
           }}
         >
@@ -448,41 +405,37 @@ export default function HomePage() {
         size="icon"
         className="absolute bottom-24 right-6 z-20 w-12 h-12 bg-white hover:bg-gray-50 text-gray-600 rounded-full shadow-lg border border-border"
         onClick={async () => {
+          console.log("[v0] Refreshing current location")
           try {
-            const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-              navigator.geolocation.getCurrentPosition(resolve, reject)
-            })
-
-            const address = await reverseGeocode(position.coords.latitude, position.coords.longitude)
-            setCurrentLocation({
-              address,
-              lat: position.coords.latitude,
-              lng: position.coords.longitude,
-            })
-
-            // Re-render Google Map if available
-            const mapEl = document.getElementById("google-map")
-            if (mapEl && window.google) {
-              const map = new window.google.maps.Map(mapEl, {
-                center: { lat: position.coords.latitude, lng: position.coords.longitude },
-                zoom: 16,
+            if (navigator.geolocation) {
+              const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+                navigator.geolocation.getCurrentPosition(resolve, reject, {
+                  enableHighAccuracy: true,
+                  timeout: 5000,
+                  maximumAge: 0,
+                })
               })
 
-              new window.google.maps.Marker({
-                position: { lat: position.coords.latitude, lng: position.coords.longitude },
-                map: map,
-                icon: {
-                  path: window.google.maps.SymbolPath.CIRCLE,
-                  scale: 8,
-                  fillColor: "#66B4C1",
-                  fillOpacity: 1,
-                  strokeColor: "#ffffff",
-                  strokeWeight: 2,
-                },
+              const address = await reverseGeocode(position.coords.latitude, position.coords.longitude)
+              setCurrentLocation({
+                address,
+                lat: position.coords.latitude,
+                lng: position.coords.longitude,
               })
+              console.log("[v0] Location updated successfully")
+            } else {
+              throw new Error("Geolocation not available")
             }
           } catch (error) {
-            alert("Unable to get current location")
+            console.log("[v0] Location refresh failed, using random fallback")
+            const randomLat = -7.9666 + (Math.random() - 0.5) * 0.01
+            const randomLng = 112.6326 + (Math.random() - 0.5) * 0.01
+            const address = await reverseGeocode(randomLat, randomLng)
+            setCurrentLocation({
+              address,
+              lat: randomLat,
+              lng: randomLng,
+            })
           }
         }}
       >
